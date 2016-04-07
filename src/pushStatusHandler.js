@@ -1,7 +1,8 @@
 import { md5Hash, newObjectId } from './cryptoUtils';
+import { logger } from './logger';
 
 export function flatten(array) {
-  return array.reduce((memo, element) => {
+  return array.reduce((memo, element) => {
     if (Array.isArray(element)) {
       memo = memo.concat(flatten(element));
     } else {
@@ -15,17 +16,17 @@ export default function pushStatusHandler(config) {
 
   let initialPromise;
   let pushStatus;
-
+  let objectId = newObjectId();
   let collection = function() {
     return config.database.adaptiveCollection('_PushStatus');
   }
 
-  let setInitial = function(body, where, options = {source: 'rest'}) {
+  let setInitial = function(body = {}, where, options = {source: 'rest'}) {
     let now = new Date();
-    let objectId = newObjectId();
+    let data =  body.data || {};
     let object = {
       _id: objectId,
-      objectId: objectId,
+      objectId,
       pushTime: now.toISOString(),
       _created_at: now,
       query: JSON.stringify(where),
@@ -35,14 +36,14 @@ export default function pushStatusHandler(config) {
       expiry: body.expiration_time,
       status: "pending",
       numSent: 0,
-      pushHash: md5Hash(JSON.stringify(body.data)),
+      pushHash: md5Hash(JSON.stringify(data)),
       // lockdown!
       _wperm: [],
       _rperm: []
     }
     initialPromise = collection().then((collection) => {
       return collection.insertOne(object);
-    }).then((res) => {
+    }).then((res) => {
       pushStatus = {
         objectId: object.objectId
       };
@@ -51,8 +52,9 @@ export default function pushStatusHandler(config) {
     return initialPromise;
   }
 
-  let setRunning = function() {
-    return initialPromise.then(() => {
+  let setRunning = function(installations) {
+    logger.verbose('sending push to %d installations', installations.length);
+    return initialPromise.then(() => {
       return collection();
     }).then((collection) => {
       return collection.updateOne({status:"pending", objectId: pushStatus.objectId}, {$set: {status: "running"}});
@@ -67,7 +69,7 @@ export default function pushStatusHandler(config) {
     };
     if (Array.isArray(results)) {
       results = flatten(results);
-      results.reduce((memo, result) => {
+      results.reduce((memo, result) => {
         // Cannot handle that
         if (!result.device || !result.device.deviceType) {
           return memo;
@@ -88,17 +90,32 @@ export default function pushStatusHandler(config) {
         return memo;
       }, update);
     }
-
-    return initialPromise.then(() => {
+    logger.verbose('sent push! %d success, %d failures', update.numSent, update.numFailed);
+    return initialPromise.then(() => {
       return collection();
     }).then((collection) => {
       return collection.updateOne({status:"running", objectId: pushStatus.objectId}, {$set: update});
     });
   }
 
+  let fail = function(err) {
+    let update = {
+      errorMessage: JSON.stringify(err),
+      status: 'failed'
+    }
+    logger.error('error while sending push', err);
+    return initialPromise.then(() => {
+      return collection();
+    }).then((collection) => {
+      return collection.updateOne({objectId: pushStatus.objectId}, {$set: update});
+    });
+  }
+
   return Object.freeze({
+    objectId,
     setInitial,
     setRunning,
-    complete
+    complete,
+    fail
   })
 }
