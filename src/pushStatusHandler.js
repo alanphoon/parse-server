@@ -1,5 +1,4 @@
 import { md5Hash, newObjectId } from './cryptoUtils';
-import { logger } from './logger';
 
 export function flatten(array) {
   return array.reduce((memo, element) => {
@@ -21,21 +20,22 @@ export default function pushStatusHandler(config) {
     return config.database.adaptiveCollection('_PushStatus');
   }
 
-  let setInitial = function(body = {}, where, options = {source: 'rest'}) {
+  let setInitial = function(body, where, options = {source: 'rest'}) {
     let now = new Date();
-    let data =  body.data || {};
+    let objectId = newObjectId();
     let object = {
-      objectId: newObjectId(),
+      _id: objectId,
+      objectId: objectId,
       pushTime: now.toISOString(),
       _created_at: now,
       query: JSON.stringify(where),
-      payload: body.data,
+      payload: JSON.stringify(body.data),
       source: options.source,
       title: options.title,
       expiry: body.expiration_time,
       status: "pending",
       numSent: 0,
-      pushHash: md5Hash(JSON.stringify(data)),
+      pushHash: md5Hash(JSON.stringify(body.data)),
       // lockdown!
       _wperm: [],
       _rperm: []
@@ -51,8 +51,7 @@ export default function pushStatusHandler(config) {
     return initialPromise;
   }
 
-  let setRunning = function(installations) {
-    logger.verbose('sending push to %d installations', installations.length);
+  let setRunning = function() {
     return initialPromise.then(() => {
       return collection();
     }).then((collection) => {
@@ -89,7 +88,7 @@ export default function pushStatusHandler(config) {
         return memo;
       }, update);
     }
-    logger.verbose('sent push! %d success, %d failures', update.numSent, update.numFailed);
+
     return initialPromise.then(() => {
       return collection();
     }).then((collection) => {
@@ -97,23 +96,9 @@ export default function pushStatusHandler(config) {
     });
   }
 
-  let fail = function(err) {
-    let update = {
-      errorMessage: JSON.stringify(err),
-      status: 'failed'
-    }
-    logger.error('error while sending push', err);
-    return initialPromise.then(() => {
-      return collection();
-    }).then((collection) => {
-      return collection.updateOne({objectId: pushStatus.objectId}, {$set: update});
-    });
-  }
-
   return Object.freeze({
     setInitial,
     setRunning,
-    complete,
-    fail
+    complete
   })
 }
