@@ -6,6 +6,8 @@ import rest from '../rest';
 
 export class InstallationsRouter extends ClassesRouter {
   handleFind(req) {
+    
+    var body = Object.assign(req.body, ClassesRouter.JSONFromQuery(req.query));
     var options = {};
     if (req.body.skip) {
       options.skip = Number(req.body.skip);
