@@ -159,7 +159,7 @@ For the full list of available options, run `parse-server --help`.
 
 * `appId` **(required)** - The application id to host with this server instance. You can use any arbitrary string. For migrated apps, this should match your hosted Parse app.
 * `masterKey` **(required)** - The master key to use for overriding ACL security.  You can use any arbitrary string. Keep it secret! For migrated apps, this should match your hosted Parse app.
-* `databaseURI` **(required)** - The connection string for your database, i.e. `mongodb://user:pass@host.com/dbname`.
+* `databaseURI` **(required)** - The connection string for your database, i.e. `mongodb://user:pass@host.com/dbname`. Be sure to [URL encode your password](https://app.zencoder.com/docs/guides/getting-started/special-characters-in-usernames-and-passwords) if your password has special charachters. 
 * `port` - The default port is 1337, specify this parameter to use a different port.
 * `serverURL` - URL to your Parse Server (don't forget to specify http:// or https://). This URL will be used when making requests to Parse Server from Cloud Code.
 * `cloud` - The absolute path to your cloud code `main.js` file.
@@ -217,7 +217,7 @@ var server = ParseServer({
 });
 ```
 
-You can also use other email adapters contributed by the community such as [parse-server-sendgrid-adapter](https://www.npmjs.com/package/parse-server-sendgrid-adapter).
+You can also use other email adapters contributed by the community such as [parse-server-sendgrid-adapter](https://www.npmjs.com/package/parse-server-sendgrid-adapter) or [parse-server-mandrill-adapter](https://github.com/back4app/parse-server-mandrill-adapter).
 
 ### Using environment variables to configure Parse Server
 

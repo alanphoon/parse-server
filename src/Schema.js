@@ -15,7 +15,6 @@
 // TODO: hide all schema logic inside the database adapter.
 
 const Parse = require('parse/node').Parse;
-const transform = require('./transform');
 import MongoSchemaCollection from './Adapters/Storage/Mongo/MongoSchemaCollection';
 import _                     from 'lodash';
 
@@ -429,7 +428,7 @@ class Schema {
   validateField(className, fieldName, type, freeze) {
     return this.reloadData().then(() => {
       // Just to check that the fieldName is valid
-      transform.transformKey(this, className, fieldName);
+      this._collection.transform.transformKey(this, className, fieldName);
 
       if( fieldName.indexOf(".") > 0 ) {
         // subdocument key (x.y) => ok if x is of type 'object'
@@ -525,9 +524,7 @@ class Schema {
 
       if (this.data[className][fieldName].type == 'Relation') {
         //For relations, drop the _Join table
-        return database.adaptiveCollection(className).then(collection => {
-          return database.adapter.deleteFields(className, [fieldName], [], database.collectionPrefix, collection);
-        })
+        return database.adapter.deleteFields(className, [fieldName], [])
         .then(() => database.dropCollection(`_Join:${fieldName}:${className}`))
         .catch(error => {
           // 'ns not found' means collection was already gone. Ignore deletion attempt.
@@ -541,8 +538,7 @@ class Schema {
 
       const fieldNames = [fieldName];
       const pointerFieldNames = this.data[className][fieldName].type === 'Pointer' ? [fieldName] : [];
-      return database.adaptiveCollection(className)
-      .then(collection => database.adapter.deleteFields(className, fieldNames, pointerFieldNames, database.collectionPrefix, collection));
+      return database.adapter.deleteFields(className, fieldNames, pointerFieldNames);
     });
   }
 
