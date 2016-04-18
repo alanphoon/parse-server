@@ -41,15 +41,10 @@ export default function pushStatusHandler(config) {
       _wperm: [],
       _rperm: []
     }
-<<<<<<< HEAD
-    initialPromise = collection().then((collection) => {
-      return collection.insertOne(object);
-    }).then((res) => {
-=======
 
     return database.create(PUSH_STATUS_COLLECTION, object).then(() => {
->>>>>>> upstream/master
-      pushStatus = {
+
+    pushStatus = {
         objectId
       };
       return Promise.resolve(pushStatus);
@@ -58,17 +53,10 @@ export default function pushStatusHandler(config) {
 
   let setRunning = function(installations) {
     logger.verbose('sending push to %d installations', installations.length);
-<<<<<<< HEAD
-    return initialPromise.then(() => {
-      return collection();
-    }).then((collection) => {
-      return collection.updateOne({status:"pending", _id: objectId}, {$set: {status: "running"}});
-   });
-=======
+
     return database.update(PUSH_STATUS_COLLECTION,
       {status:"pending", objectId: objectId},
       {status: "running"});
->>>>>>> upstream/master
   }
 
   let complete = function(results) {
@@ -101,15 +89,7 @@ export default function pushStatusHandler(config) {
       }, update);
     }
     logger.verbose('sent push! %d success, %d failures', update.numSent, update.numFailed);
-<<<<<<< HEAD
-    return initialPromise.then(() => {
-      return collection();
-    }).then((collection) => {
-      return collection.updateOne({status:"running", _id: objectId}, {$set: update});
-    });
-=======
     return database.update('_PushStatus', {status:"running", objectId }, update);
->>>>>>> upstream/master
   }
 
   let fail = function(err) {
@@ -118,15 +98,9 @@ export default function pushStatusHandler(config) {
       status: 'failed'
     }
     logger.error('error while sending push', err);
-<<<<<<< HEAD
-    return initialPromise.then(() => {
-      return collection();
-    }).then((collection) => {
-      return collection.updateOne({_id: objectId}, {$set: update});
-    });
-=======
+
     return database.update('_PushStatus', { objectId }, update);
->>>>>>> upstream/master
+
   }
 
   return Object.freeze({
