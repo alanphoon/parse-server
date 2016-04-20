@@ -15,8 +15,7 @@
 // TODO: hide all schema logic inside the database adapter.
 
 const Parse = require('parse/node').Parse;
-import MongoSchemaCollection from './Adapters/Storage/Mongo/MongoSchemaCollection';
-import _                     from 'lodash';
+import _ from 'lodash';
 
 const defaultColumns = Object.freeze({
   // Contain the default columns for every parse object type (except _Join collection)
@@ -201,15 +200,27 @@ const fieldTypeIsInvalid = ({ type, targetClass }) => {
   return undefined;
 }
 
+const injectDefaultSchema = schema => ({
+  className: schema.className,
+  fields: {
+    ...defaultColumns._Default,
+    ...(defaultColumns[schema.className] || {}),
+    ...schema.fields,
+  },
+  classLevelPermissions: schema.classLevelPermissions,
+})
+
 // Stores the entire schema of the app in a weird hybrid format somewhere between
 // the mongo format and the Parse format. Soon, this will all be Parse format.
-class Schema {
+class SchemaController {
   _collection;
+  _dbAdapter;
   data;
   perms;
 
-  constructor(collection) {
+  constructor(collection, databaseAdapter) {
     this._collection = collection;
+    this._dbAdapter = databaseAdapter;
 
     // this.data[className][fieldName] tells you the type of that field, in mongo format
     this.data = {};
@@ -220,17 +231,23 @@ class Schema {
   reloadData() {
     this.data = {};
     this.perms = {};
-    return this._collection.getAllSchemas().then(allSchemas => {
+    return this.getAllSchemas()
+    .then(allSchemas => {
       allSchemas.forEach(schema => {
-        const parseFormatSchema = {
-          ...defaultColumns._Default,
-          ...(defaultColumns[schema.className] || {}),
-          ...schema.fields,
-        }
-        this.data[schema.className] = parseFormatSchema;
+        this.data[schema.className] = schema.fields;
         this.perms[schema.className] = schema.classLevelPermissions;
       });
     });
+  }
+
+  getAllSchemas() {
+    return this._dbAdapter.getAllSchemas()
+    .then(allSchemas => allSchemas.map(injectDefaultSchema));
+  }
+
+  getOneSchema(className) {
+    return this._dbAdapter.getOneSchema(className)
+    .then(injectDefaultSchema);
   }
 
   // Create a new class that includes the three default fields.
@@ -247,9 +264,6 @@ class Schema {
     }
 
     return this._collection.addSchema(className, fields, classLevelPermissions)
-    .then(res => {
-      return Promise.resolve(res);
-    })
     .catch(error => {
       if (error === undefined) {
         throw new Parse.Error(Parse.Error.INVALID_CLASS_NAME, `Class ${className} already exists.`);
@@ -260,40 +274,42 @@ class Schema {
   }
 
   updateClass(className, submittedFields, classLevelPermissions, database) {
-    if (!this.data[className]) {
-      throw new Parse.Error(Parse.Error.INVALID_CLASS_NAME, `Class ${className} does not exist.`);
-    }
-    let existingFields = Object.assign(this.data[className], {_id: className});
-    Object.keys(submittedFields).forEach(name => {
-      let field = submittedFields[name];
-      if (existingFields[name] && field.__op !== 'Delete') {
-        throw new Parse.Error(255, `Field ${name} exists, cannot update.`);
+    return this.hasClass(className)
+    .then(hasClass => {
+      if (!hasClass) {
+        throw new Parse.Error(Parse.Error.INVALID_CLASS_NAME, `Class ${className} does not exist.`);
       }
-      if (!existingFields[name] && field.__op === 'Delete') {
-        throw new Parse.Error(255, `Field ${name} does not exist, cannot delete.`);
+      let existingFields = Object.assign(this.data[className], {_id: className});
+      Object.keys(submittedFields).forEach(name => {
+        let field = submittedFields[name];
+        if (existingFields[name] && field.__op !== 'Delete') {
+          throw new Parse.Error(255, `Field ${name} exists, cannot update.`);
+        }
+        if (!existingFields[name] && field.__op === 'Delete') {
+          throw new Parse.Error(255, `Field ${name} does not exist, cannot delete.`);
+        }
+      });
+
+      let newSchema = buildMergedSchemaObject(existingFields, submittedFields);
+      let validationError = this.validateSchemaData(className, newSchema, classLevelPermissions);
+      if (validationError) {
+        throw new Parse.Error(validationError.code, validationError.error);
       }
-    });
 
-    let newSchema = buildMergedSchemaObject(existingFields, submittedFields);
-    let validationError = this.validateSchemaData(className, newSchema, classLevelPermissions);
-    if (validationError) {
-      throw new Parse.Error(validationError.code, validationError.error);
-    }
+      // Finally we have checked to make sure the request is valid and we can start deleting fields.
+      // Do all deletions first, then a single save to _SCHEMA collection to handle all additions.
+      let deletePromises = [];
+      let insertedFields = [];
+      Object.keys(submittedFields).forEach(fieldName => {
+        if (submittedFields[fieldName].__op === 'Delete') {
+          const promise = this.deleteField(fieldName, className, database);
+          deletePromises.push(promise);
+        } else {
+          insertedFields.push(fieldName);
+        }
+      });
 
-    // Finally we have checked to make sure the request is valid and we can start deleting fields.
-    // Do all deletions first, then a single save to _SCHEMA collection to handle all additions.
-    let deletePromises = [];
-    let insertedFields = [];
-    Object.keys(submittedFields).forEach(fieldName => {
-      if (submittedFields[fieldName].__op === 'Delete') {
-        const promise = this.deleteField(fieldName, className, database);
-        deletePromises.push(promise);
-      } else {
-        insertedFields.push(fieldName);
-      }
-    });
-
-    return Promise.all(deletePromises) // Delete Everything
+      return Promise.all(deletePromises) // Delete Everything
       .then(() => this.reloadData()) // Reload our Schema, so we have all the new values
       .then(() => {
         let promises = insertedFields.map(fieldName => {
@@ -302,15 +318,14 @@ class Schema {
         });
         return Promise.all(promises);
       })
-      .then(() => {
-        return this.setPermissions(className, classLevelPermissions)
-      })
+      .then(() => this.setPermissions(className, classLevelPermissions))
       //TODO: Move this logic into the database adapter
-      .then(() => {
-        return { className: className,
-              fields: this.data[className],
-              classLevelPermissions: this.perms[className] }
-      });
+      .then(() => ({
+        className: className,
+        fields: this.data[className],
+        classLevelPermissions: this.perms[className]
+      }));
+    })
   }
 
 
@@ -463,18 +478,11 @@ class Schema {
         return Promise.resolve(this);
       }
 
-      if (type === 'GeoPoint') {
-        // Make sure there are not other geopoint fields
-        for (let otherKey in this.data[className]) {
-          if (this.data[className][otherKey].type === 'GeoPoint') {
-            throw new Parse.Error(
-              Parse.Error.INCORRECT_TYPE,
-              'there can only be one geopoint field in a class');
-          }
-        }
+      if (typeof type === 'string') {
+        type = { type };
       }
 
-      return this._collection.updateField(className, fieldName, type).then(() => {
+      return this._collection.addFieldIfNotExists(className, fieldName, type).then(() => {
         // The update succeeded. Reload the schema
         return this.reloadData();
       }, () => {
@@ -525,15 +533,7 @@ class Schema {
       if (this.data[className][fieldName].type == 'Relation') {
         //For relations, drop the _Join table
         return database.adapter.deleteFields(className, [fieldName], [])
-        .then(() => database.dropCollection(`_Join:${fieldName}:${className}`))
-        .catch(error => {
-          // 'ns not found' means collection was already gone. Ignore deletion attempt.
-          // TODO: 'ns not found' is a mongo implementation detail. Move it into mongo adapter.
-          if (error.message == 'ns not found') {
-            return Promise.resolve();
-          }
-          return Promise.reject(error);
-        });
+        .then(() => database.adapter.dropCollection(`_Join:${fieldName}:${className}`));
       }
 
       const fieldNames = [fieldName];
@@ -637,9 +637,7 @@ class Schema {
     return undefined;
   };
 
-  // Checks if a given class is in the schema. Needs to load the
-  // schema first, which is kinda janky. Hopefully we can refactor
-  // and make this be a regular value.
+  // Checks if a given class is in the schema.
   hasClass(className) {
     return this.reloadData().then(() => !!(this.data[className]));
   }
@@ -672,8 +670,8 @@ class Schema {
 }
 
 // Returns a promise for a new Schema.
-function load(collection) {
-  let schema = new Schema(collection);
+function load(collection, dbAdapter) {
+  let schema = new SchemaController(collection, dbAdapter);
   return schema.reloadData().then(() => schema);
 }
 

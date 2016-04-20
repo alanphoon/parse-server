@@ -6,7 +6,7 @@ import intersect from 'intersect';
 var mongodb = require('mongodb');
 var Parse = require('parse/node').Parse;
 
-var Schema = require('./../Schema');
+var SchemaController = require('../Controllers/SchemaController');
 const deepcopy = require('deepcopy');
 
 function DatabaseController(adapter, { skipValidation } = {}) {
@@ -44,15 +44,11 @@ DatabaseController.prototype.collectionExists = function(className) {
   return this.adapter.collectionExists(className);
 };
 
-DatabaseController.prototype.dropCollection = function(className) {
-  return this.adapter.dropCollection(className);
-};
-
 DatabaseController.prototype.validateClassName = function(className) {
   if (this.skipValidation) {
     return Promise.resolve();
   }
-  if (!Schema.classNameIsValid(className)) {
+  if (!SchemaController.classNameIsValid(className)) {
     const error = new Parse.Error(Parse.Error.INVALID_CLASS_NAME, 'invalid className: ' + className);
     return Promise.reject(error);
   }
@@ -62,26 +58,15 @@ DatabaseController.prototype.validateClassName = function(className) {
 // Returns a promise for a schema object.
 // If we are provided a acceptor, then we run it on the schema.
 // If the schema isn't accepted, we reload it at most once.
-DatabaseController.prototype.loadSchema = function(acceptor = () => true) {
+DatabaseController.prototype.loadSchema = function() {
 
   if (!this.schemaPromise) {
     this.schemaPromise = this.schemaCollection().then(collection => {
       delete this.schemaPromise;
-      return Schema.load(collection);
+      return SchemaController.load(collection, this.adapter);
     });
-    return this.schemaPromise;
   }
-
-  return this.schemaPromise.then((schema) => {
-    if (acceptor(schema)) {
-      return schema;
-    }
-    this.schemaPromise = this.schemaCollection().then(collection => {
-      delete this.schemaPromise;
-      return Schema.load(collection);
-    });
-    return this.schemaPromise;
-  });
+  return this.schemaPromise;
 };
 
 // Returns a promise for the classname that is related to the given
@@ -151,13 +136,10 @@ DatabaseController.prototype.update = function(className, query, update, options
   // Make a copy of the object, so we don't mutate the incoming data.
   update = deepcopy(update);
 
-  var acceptor = function(schema) {
-    return schema.hasKeys(className, Object.keys(query));
-  };
   var isMaster = !('acl' in options);
   var aclGroup = options.acl || [];
   var mongoUpdate, schema;
-  return this.loadSchema(acceptor)
+  return this.loadSchema()
     .then(s => {
       schema = s;
       if (!isMaster) {
@@ -590,9 +572,8 @@ DatabaseController.prototype.find = function(className, query, options = {}) {
   }
   let isMaster = !('acl' in options);
   let aclGroup = options.acl || [];
-  let acceptor = schema => schema.hasKeys(className, keysForQuery(query))
   let schema = null;
-  return this.loadSchema(acceptor).then(s => {
+  return this.loadSchema().then(s => {
     schema = s;
     if (options.sort) {
       mongoOptions.sort = {};
