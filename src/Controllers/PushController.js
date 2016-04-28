@@ -12,6 +12,12 @@ import pushStatusHandler   from '../pushStatusHandler';
 const FEATURE_NAME = 'push';
 const UNSUPPORTED_BADGE_KEY = "unsupported";
 
+/** Debug Logging AP **/
+  function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+  var _npmlog = require('npmlog');
+  var _npmlog2 = _interopRequireDefault(_npmlog);
+  /**********************/
+
 export class PushController extends AdaptableController {
 
   /**
@@ -92,6 +98,9 @@ export class PushController extends AdaptableController {
       pushStatus.setRunning(response.results);
       return this.sendToAdapter(body, response.results, pushStatus, config);
     }).then((results) => {
+      /** Debug Logging AP **/
+      _npmlog2.default.info('pushcontroller >> sendPush >> results >> ', results);
+      /*********************/
       return pushStatus.complete(results);
     }).catch((err) => {
       pushStatus.fail(err);
@@ -101,12 +110,9 @@ export class PushController extends AdaptableController {
 
   sendToAdapter(body, installations, pushStatus, config) {
 
-    function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-    var _npmlog = require('npmlog');
-    var _npmlog2 = _interopRequireDefault(_npmlog);
-    _npmlog2.default.info('pushcontroller >> ', installations.length);
-
+    /** Debug Logging AP **/
+    _npmlog2.default.info('pushcontroller >> sendToAdapter >> device count >> ', installations.length);
+    /*********************/
 
     if (body.data && body.data.badge && typeof body.data.badge == 'string' && body.data.badge.toLowerCase() == "increment") {
       // Collect the badges to reduce the # of calls
@@ -128,9 +134,6 @@ export class PushController extends AdaptableController {
         } else {
           payload.data.badge = parseInt(badge);
         }
-
-
-
         return this.adapter.send(payload, badgeInstallationsMap[badge]);
       });
       return Promise.all(promises);
