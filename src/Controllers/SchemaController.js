@@ -649,11 +649,6 @@ class SchemaController {
         found = true;
       }
     }
-<<<<<<< HEAD
-    if (!found) {
-      // TODO: Verify correct error code
-      throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND,
-=======
 
     if (found) {
       return Promise.resolve();
@@ -666,7 +661,6 @@ class SchemaController {
     // Reject create when write lockdown
     if (permissionField == 'writeUserFields' && operation == 'create') {
       throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN,
->>>>>>> upstream/master
         'Permission denied for this action.');
     }
   };

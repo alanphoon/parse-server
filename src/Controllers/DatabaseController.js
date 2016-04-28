@@ -112,7 +112,7 @@ DatabaseController.prototype.validateObject = function(className, object, query,
       return Promise.resolve();
     }
     return this.canAddField(schema, className, object, aclGroup);
-  }).then(() => {
+  }).then(() => {
     return schema.validateObject(className, object, query);
   });
 };
@@ -127,12 +127,13 @@ DatabaseController.prototype.untransformObject = function(
     return object;
   }
 
-  delete object.authData;
   delete object.sessionToken;
 
   if (isMaster || (aclGroup.indexOf(object.objectId) > -1)) {
     return object;
   }
+
+  delete object.authData;
 
   return object;
 };
@@ -209,7 +210,7 @@ function sanitizeDatabaseResult(originalObject, result) {
     let keyUpdate = originalObject[key];
     // determine if that was an op
     if (keyUpdate && typeof keyUpdate === 'object' && keyUpdate.__op
-      && ['Add', 'AddUnique', 'Remove', 'Increment'].indexOf(keyUpdate.__op) > -1) {
+      && ['Add', 'AddUnique', 'Remove', 'Increment'].indexOf(keyUpdate.__op) > -1) {
       // only valid ops that produce an actionable result
       response[key] = result[key];
     }
@@ -303,28 +304,6 @@ DatabaseController.prototype.destroy = function(className, query, { acl } = {}) 
   const aclGroup = acl || [];
 
   return this.loadSchema()
-<<<<<<< HEAD
-    .then(s => {
-      schema = s;
-      if (!isMaster) {
-        return schema.validatePermission(className, aclGroup, 'delete');
-      }
-      return Promise.resolve();
-    })
-    .then(() => this.adapter.adaptiveCollection(className))
-    .then(collection => {
-      let mongoWhere = this.transform.transformWhere(schema, className, query, {validate: !this.skipValidation});
-      if (options.acl) {
-        mongoWhere = this.transform.addWriteACL(mongoWhere, options.acl);
-      }
-      return collection.deleteMany(mongoWhere);
-    })
-    .then(resp => {
-      //Check _Session to avoid changing password failed without any session.
-      // TODO: @nlutsenko Stop relying on `result.n`
-      if (resp.result.n === 0 && className !== "_Session") {
-        throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Object not found.');
-=======
   .then(schemaController => {
     return (isMaster ? Promise.resolve() : schemaController.validatePermission(className, aclGroup, 'delete'))
     .then(() => {
@@ -337,7 +316,6 @@ DatabaseController.prototype.destroy = function(className, query, { acl } = {}) 
       // delete by query
       if (acl) {
         query = addWriteACL(query, acl);
->>>>>>> upstream/master
       }
       return this.adapter.deleteObjectsByQuery(className, query, schemaController, !this.skipValidation)
       .catch(error => {
@@ -358,37 +336,19 @@ DatabaseController.prototype.create = function(className, object, { acl } = {}) 
   let originalObject = object;
   object = deepcopy(object);
 
-<<<<<<< HEAD
-  var schema;
-  var isMaster = !('acl' in options);
-  var aclGroup = options.acl || [];
-=======
   var isMaster = acl === undefined;
   var aclGroup = acl || [];
->>>>>>> upstream/master
 
   return this.validateClassName(className)
-    .then(() => this.loadSchema())
-    .then(s => {
-      schema = s;
-      if (!isMaster) {
-        return schema.validatePermission(className, aclGroup, 'create');
-      }
-      return Promise.resolve();
-    })
+  .then(() => this.loadSchema())
+  .then(schemaController => {
+    return (isMaster ? Promise.resolve() : schemaController.validatePermission(className, aclGroup, 'create'))
     .then(() => this.handleRelationUpdates(className, null, object))
-<<<<<<< HEAD
-    .then(() => this.adapter.createObject(className, object, schema))
-    .then(result => {
-      return sanitizeDatabaseResult(originalObject, result.ops[0]);
-    });
-=======
     .then(() => schemaController.enforceClassExists(className))
     .then(() => schemaController.getOneSchema(className, true))
     .then(schema => this.adapter.createObject(className, object, schemaController, schema))
     .then(result => sanitizeDatabaseResult(originalObject, result.ops[0]));
   })
->>>>>>> upstream/master
 };
 
 DatabaseController.prototype.canAddField = function(schema, className, object, aclGroup) {
@@ -398,7 +358,7 @@ DatabaseController.prototype.canAddField = function(schema, className, object, a
   }
   let fields = Object.keys(object);
   let schemaFields = Object.keys(classSchema);
-  let newKeys = fields.filter((field) => {
+  let newKeys = fields.filter((field) => {
     return schemaFields.indexOf(field) < 0;
   })
   if (newKeys.length > 0) {
@@ -428,7 +388,7 @@ DatabaseController.prototype.deleteEverything = function() {
 function keysForQuery(query) {
   var sublist = query['$and'] || query['$or'];
   if (sublist) {
-    let answer = sublist.reduce((memo, subquery) => {
+    let answer = sublist.reduce((memo, subquery) => {
       return memo.concat(keysForQuery(subquery));
     }, []);
 
@@ -464,7 +424,7 @@ DatabaseController.prototype.reduceInRelation = function(className, query, schem
   if (query['$or']) {
     let ors = query['$or'];
     return Promise.all(ors.map((aQuery, index) => {
-      return this.reduceInRelation(className, aQuery, schema).then((aQuery) => {
+      return this.reduceInRelation(className, aQuery, schema).then((aQuery) => {
         query['$or'][index] = aQuery;
       })
     }));
@@ -526,7 +486,7 @@ DatabaseController.prototype.reduceInRelation = function(className, query, schem
     return Promise.resolve();
   })
 
-  return Promise.all(promises).then(() => {
+  return Promise.all(promises).then(() => {
     return Promise.resolve(query);
   })
 };
@@ -634,6 +594,9 @@ DatabaseController.prototype.find = function(className, query, {
   let isMaster = acl === undefined;
   let aclGroup = acl || [];
   let schema = null;
+  let op = typeof query.objectId == 'string' && Object.keys(query).length === 1 ?
+        'get' :
+        'find';
   return this.loadSchema().then(s => {
     schema = s;
     if (sort) {
@@ -645,9 +608,6 @@ DatabaseController.prototype.find = function(className, query, {
     }
 
     if (!isMaster) {
-      let op = typeof query.objectId == 'string' && Object.keys(query).length === 1 ?
-        'get' :
-        'find';
       return schema.validatePermission(className, aclGroup, op);
     }
     return Promise.resolve();
@@ -656,9 +616,6 @@ DatabaseController.prototype.find = function(className, query, {
   .then(() => this.reduceInRelation(className, query, schema))
   .then(() => this.adapter.adaptiveCollection(className))
   .then(collection => {
-<<<<<<< HEAD
-    let mongoWhere = this.transform.transformWhere(schema, className, query);
-=======
     if (!isMaster) {
       query = this.addPointerPermissions(schema, className, op, query, aclGroup);
     }
@@ -670,7 +627,6 @@ DatabaseController.prototype.find = function(className, query, {
         return Promise.resolve([]);
       }
     }
->>>>>>> upstream/master
     if (!isMaster) {
       query = addReadACL(query, aclGroup);
     }
@@ -705,6 +661,42 @@ DatabaseController.prototype.deleteSchema = function(className) {
       return this.adapter.deleteOneSchema(className);
     })
   });
+}
+
+DatabaseController.prototype.addPointerPermissions = function(schema, className, operation, query, aclGroup = []) {
+  let perms = schema.perms[className];
+  let field = ['get', 'find'].indexOf(operation) > -1 ? 'readUserFields' : 'writeUserFields';
+  let userACL = aclGroup.filter((acl) => {
+     return acl.indexOf('role:') != 0 && acl != '*';
+  });
+  // the ACL should have exactly 1 user
+  if (perms && perms[field] && perms[field].length > 0) {
+    // No user set return undefined
+    if (userACL.length != 1) {
+      return;
+    }
+    let userId = userACL[0];
+    let userPointer =  {
+          "__type": "Pointer",
+          "className": "_User",
+          "objectId": userId
+        };
+
+    let constraints = {};
+    let permFields = perms[field];
+    let ors = permFields.map((key) => {
+      let q = {
+        [key]: userPointer
+      };
+      return {'$and': [q, query]};
+    });
+    if (ors.length > 1) {
+      return {'$or': ors};
+    }
+    return ors[0];
+  } else {
+    return query;
+  }
 }
 
 function joinTableName(className, key) {
