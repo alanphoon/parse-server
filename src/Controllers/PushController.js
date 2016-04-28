@@ -8,7 +8,7 @@ import RestQuery           from '../RestQuery';
 import RestWrite           from '../RestWrite';
 import { master }          from '../Auth';
 import pushStatusHandler   from '../pushStatusHandler';
-import { logger } from './logger';
+import { logger } from './../logger';
 
 const FEATURE_NAME = 'push';
 const UNSUPPORTED_BADGE_KEY = "unsupported";
