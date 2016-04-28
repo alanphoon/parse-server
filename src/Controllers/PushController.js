@@ -8,6 +8,7 @@ import RestQuery           from '../RestQuery';
 import RestWrite           from '../RestWrite';
 import { master }          from '../Auth';
 import pushStatusHandler   from '../pushStatusHandler';
+import log                 from '../logger';
 
 const FEATURE_NAME = 'push';
 const UNSUPPORTED_BADGE_KEY = "unsupported";
@@ -100,9 +101,6 @@ export class PushController extends AdaptableController {
   }
 
   sendToAdapter(body, installations, pushStatus, config) {
-    
-    var _npmlog = require('npmlog');
-    var _npmlog2 = _interopRequireDefault(_npmlog);
 
     if (body.data && body.data.badge && typeof body.data.badge == 'string' && body.data.badge.toLowerCase() == "increment") {
       // Collect the badges to reduce the # of calls
@@ -124,7 +122,8 @@ export class PushController extends AdaptableController {
         } else {
           payload.data.badge = parseInt(badge);
         }
-        _npmlog2.default.verbose('PushController: ', badgeInstallationsMap[badge]);
+
+        log.info('pushcontroller >>', badgeInstallationsMap[badge]);
         return this.adapter.send(payload, badgeInstallationsMap[badge]);
       });
       return Promise.all(promises);
