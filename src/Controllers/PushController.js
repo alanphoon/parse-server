@@ -105,7 +105,7 @@ export class PushController extends AdaptableController {
 
     var _npmlog = require('npmlog');
     var _npmlog2 = _interopRequireDefault(_npmlog);
-    _npmlog2.default.verbose('pushcontroller >> ', installations);
+    _npmlog2.default.info('pushcontroller >> ', installations.length);
 
 
     if (body.data && body.data.badge && typeof body.data.badge == 'string' && body.data.badge.toLowerCase() == "increment") {
