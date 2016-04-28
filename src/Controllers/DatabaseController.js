@@ -2,12 +2,27 @@
 // Parse database.
 
 import intersect from 'intersect';
+import _         from 'lodash';
 
 var mongodb = require('mongodb');
 var Parse = require('parse/node').Parse;
 
 var SchemaController = require('../Controllers/SchemaController');
 const deepcopy = require('deepcopy');
+
+function addWriteACL(query, acl) {
+  let newQuery = _.cloneDeep(query);
+  //Can't be any existing '_wperm' query, we don't allow client queries on that, no need to $and
+  newQuery._wperm = { "$in" : [null, ...acl]};
+  return newQuery;
+}
+
+function addReadACL(query, acl) {
+  let newQuery = _.cloneDeep(query);
+  //Can't be any existing '_rperm' query, we don't allow client queries on that, no need to $and
+  newQuery._rperm = { "$in" : [null, "*", ...acl]};
+  return newQuery;
+}
 
 function DatabaseController(adapter, { skipValidation } = {}) {
   this.adapter = adapter;
@@ -87,10 +102,10 @@ DatabaseController.prototype.redirectClassNameForKey = function(className, key) 
 // Returns a promise that resolves to the new schema.
 // This does not update this.schema, because in a situation like a
 // batch request, that could confuse other users of the schema.
-DatabaseController.prototype.validateObject = function(className, object, query, options) {
+DatabaseController.prototype.validateObject = function(className, object, query, { acl }) {
   let schema;
-  let isMaster = !('acl' in options);
-  var aclGroup = options.acl || [];
+  let isMaster = acl === undefined;
+  var aclGroup = acl || [];
   return this.loadSchema().then(s => {
     schema = s;
     if (isMaster) {
@@ -130,14 +145,18 @@ DatabaseController.prototype.untransformObject = function(
 //   acl:  a list of strings. If the object to be updated has an ACL,
 //         one of the provided strings must provide the caller with
 //         write permissions.
-DatabaseController.prototype.update = function(className, query, update, options = {}) {
+DatabaseController.prototype.update = function(className, query, update, {
+  acl,
+  many,
+  upsert,
+} = {}) {
 
   const originalUpdate = update;
   // Make a copy of the object, so we don't mutate the incoming data.
   update = deepcopy(update);
 
-  var isMaster = !('acl' in options);
-  var aclGroup = options.acl || [];
+  var isMaster = acl === undefined;
+  var aclGroup = acl || [];
   var mongoUpdate, schema;
   return this.loadSchema()
     .then(s => {
@@ -150,14 +169,20 @@ DatabaseController.prototype.update = function(className, query, update, options
     .then(() => this.handleRelationUpdates(className, query.objectId, update))
     .then(() => this.adapter.adaptiveCollection(className))
     .then(collection => {
-      var mongoWhere = this.transform.transformWhere(schema, className, query, {validate: !this.skipValidation});
-      if (options.acl) {
-        mongoWhere = this.transform.addWriteACL(mongoWhere, options.acl);
+      if (!isMaster) {
+        query = this.addPointerPermissions(schema, className, 'update', query, aclGroup);
       }
+      if (!query) {
+        return Promise.resolve();
+      }
+      if (acl) {
+        query = addWriteACL(query, acl);
+      }
+      var mongoWhere = this.transform.transformWhere(schema, className, query, {validate: !this.skipValidation});
       mongoUpdate = this.transform.transformUpdate(schema, className, update, {validate: !this.skipValidation});
-      if (options.many) {
+      if (many) {
         return collection.updateMany(mongoWhere, mongoUpdate);
-      }else if (options.upsert) {
+      } else if (upsert) {
         return collection.upsertOne(mongoWhere, mongoUpdate);
       } else {
         return collection.findOneAndUpdate(mongoWhere, mongoUpdate);
@@ -196,9 +221,7 @@ function sanitizeDatabaseResult(originalObject, result) {
 // Returns a promise that resolves successfully when these are
 // processed.
 // This mutates update.
-DatabaseController.prototype.handleRelationUpdates = function(className,
-                                                         objectId,
-                                                         update) {
+DatabaseController.prototype.handleRelationUpdates = function(className, objectId, update) {
   var pending = [];
   var deleteMe = [];
   objectId = update.objectId || objectId;
@@ -275,12 +298,12 @@ DatabaseController.prototype.removeRelation = function(key, fromClassName, fromI
 //   acl:  a list of strings. If the object to be updated has an ACL,
 //         one of the provided strings must provide the caller with
 //         write permissions.
-DatabaseController.prototype.destroy = function(className, query, options = {}) {
-  var isMaster = !('acl' in options);
-  var aclGroup = options.acl || [];
+DatabaseController.prototype.destroy = function(className, query, { acl } = {}) {
+  const isMaster = acl === undefined;
+  const aclGroup = acl || [];
 
-  var schema;
   return this.loadSchema()
+<<<<<<< HEAD
     .then(s => {
       schema = s;
       if (!isMaster) {
@@ -301,20 +324,48 @@ DatabaseController.prototype.destroy = function(className, query, options = {}) 
       // TODO: @nlutsenko Stop relying on `result.n`
       if (resp.result.n === 0 && className !== "_Session") {
         throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Object not found.');
+=======
+  .then(schemaController => {
+    return (isMaster ? Promise.resolve() : schemaController.validatePermission(className, aclGroup, 'delete'))
+    .then(() => {
+      if (!isMaster) {
+        query = this.addPointerPermissions(schemaController, className, 'delete', query, aclGroup);
+        if (!query) {
+          throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Object not found.');
+        }
       }
+      // delete by query
+      if (acl) {
+        query = addWriteACL(query, acl);
+>>>>>>> upstream/master
+      }
+      return this.adapter.deleteObjectsByQuery(className, query, schemaController, !this.skipValidation)
+      .catch(error => {
+        // When deleting sessions while changing passwords, don't throw an error if they don't have any sessions.
+        if (className === "_Session" && error.code === Parse.Error.OBJECT_NOT_FOUND) {
+          return Promise.resolve({});
+        }
+        throw error;
+      });
     });
+  });
 };
 
 // Inserts an object into the database.
 // Returns a promise that resolves successfully iff the object saved.
-DatabaseController.prototype.create = function(className, object, options = {}) {
+DatabaseController.prototype.create = function(className, object, { acl } = {}) {
   // Make a copy of the object, so we don't mutate the incoming data.
   let originalObject = object;
   object = deepcopy(object);
 
+<<<<<<< HEAD
   var schema;
   var isMaster = !('acl' in options);
   var aclGroup = options.acl || [];
+=======
+  var isMaster = acl === undefined;
+  var aclGroup = acl || [];
+>>>>>>> upstream/master
 
   return this.validateClassName(className)
     .then(() => this.loadSchema())
@@ -326,10 +377,18 @@ DatabaseController.prototype.create = function(className, object, options = {}) 
       return Promise.resolve();
     })
     .then(() => this.handleRelationUpdates(className, null, object))
+<<<<<<< HEAD
     .then(() => this.adapter.createObject(className, object, schema))
     .then(result => {
       return sanitizeDatabaseResult(originalObject, result.ops[0]);
     });
+=======
+    .then(() => schemaController.enforceClassExists(className))
+    .then(() => schemaController.getOneSchema(className, true))
+    .then(schema => this.adapter.createObject(className, object, schemaController, schema))
+    .then(result => sanitizeDatabaseResult(originalObject, result.ops[0]));
+  })
+>>>>>>> upstream/master
 };
 
 DatabaseController.prototype.canAddField = function(schema, className, object, aclGroup) {
@@ -362,11 +421,7 @@ DatabaseController.prototype.mongoFind = function(className, query, options = {}
 // Returns a promise.
 DatabaseController.prototype.deleteEverything = function() {
   this.schemaPromise = null;
-
-  return this.adapter.allCollections().then(collections => {
-    let promises = collections.map(collection => collection.drop());
-    return Promise.all(promises);
-  });
+  return this.adapter.deleteAllSchemas();
 };
 
 // Finds the keys in a query. Returns a Set. REST format only
@@ -562,24 +617,30 @@ DatabaseController.prototype.addNotInObjectIdsIds = function(ids = null, query) 
 // TODO: make userIds not needed here. The db adapter shouldn't know
 // anything about users, ideally. Then, improve the format of the ACL
 // arg to work like the others.
-DatabaseController.prototype.find = function(className, query, options = {}) {
+DatabaseController.prototype.find = function(className, query, {
+  skip,
+  limit,
+  acl,
+  sort,
+  count,
+} = {}) {
   let mongoOptions = {};
-  if (options.skip) {
-    mongoOptions.skip = options.skip;
+  if (skip) {
+    mongoOptions.skip = skip;
   }
-  if (options.limit) {
-    mongoOptions.limit = options.limit;
+  if (limit) {
+    mongoOptions.limit = limit;
   }
-  let isMaster = !('acl' in options);
-  let aclGroup = options.acl || [];
+  let isMaster = acl === undefined;
+  let aclGroup = acl || [];
   let schema = null;
   return this.loadSchema().then(s => {
     schema = s;
-    if (options.sort) {
+    if (sort) {
       mongoOptions.sort = {};
-      for (let key in options.sort) {
+      for (let key in sort) {
         let mongoKey = this.transform.transformKey(schema, className, key);
-        mongoOptions.sort[mongoKey] = options.sort[key];
+        mongoOptions.sort[mongoKey] = sort[key];
       }
     }
 
@@ -595,11 +656,26 @@ DatabaseController.prototype.find = function(className, query, options = {}) {
   .then(() => this.reduceInRelation(className, query, schema))
   .then(() => this.adapter.adaptiveCollection(className))
   .then(collection => {
+<<<<<<< HEAD
     let mongoWhere = this.transform.transformWhere(schema, className, query);
+=======
     if (!isMaster) {
-      mongoWhere = this.transform.addReadACL(mongoWhere, aclGroup);
+      query = this.addPointerPermissions(schema, className, op, query, aclGroup);
     }
-    if (options.count) {
+    if (!query) {
+      if (op == 'get') {
+        return Promise.reject(new Parse.Error(Parse.Error.OBJECT_NOT_FOUND,
+          'Object not found.'));
+      } else {
+        return Promise.resolve([]);
+      }
+    }
+>>>>>>> upstream/master
+    if (!isMaster) {
+      query = addReadACL(query, aclGroup);
+    }
+    let mongoWhere = this.transform.transformWhere(schema, className, query);
+    if (count) {
       delete mongoOptions.limit;
       return collection.count(mongoWhere, mongoOptions);
     } else {
@@ -616,21 +692,19 @@ DatabaseController.prototype.find = function(className, query, options = {}) {
 
 DatabaseController.prototype.deleteSchema = function(className) {
   return this.collectionExists(className)
-    .then(exist => {
-      if (!exist) {
-        return Promise.resolve();
+  .then(exist => {
+    if (!exist) {
+      return Promise.resolve();
+    }
+    return this.adapter.adaptiveCollection(className)
+    .then(collection => collection.count())
+    .then(count => {
+      if (count > 0) {
+        throw new Parse.Error(255, `Class ${className} is not empty, contains ${count} objects, cannot drop schema.`);
       }
-      return this.adapter.adaptiveCollection(className)
-        .then(collection => {
-          return collection.count()
-            .then(count => {
-              if (count > 0) {
-                throw new Parse.Error(255, `Class ${className} is not empty, contains ${count} objects, cannot drop schema.`);
-              }
-              return collection.drop();
-            })
-        })
+      return this.adapter.deleteOneSchema(className);
     })
+  });
 }
 
 function joinTableName(className, key) {

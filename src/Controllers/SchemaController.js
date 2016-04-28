@@ -93,6 +93,8 @@ const requiredColumns = Object.freeze({
 
 const systemClasses = Object.freeze(['_User', '_Installation', '_Role', '_Session', '_Product']);
 
+const volatileClasses = Object.freeze(['_PushStatus']);
+
 // 10 alpha numberic chars + uppercase
 const userIdRegex = /^[a-zA-Z0-9]{10}$/;
 // Anything that start with role
@@ -121,6 +123,20 @@ function validateCLP(perms) {
     if (CLPValidKeys.indexOf(operation) == -1) {
       throw new Parse.Error(Parse.Error.INVALID_JSON, `${operation} is not a valid operation for class level permissions`);
     }
+
+    if (operation === 'readUserFields' || operation === 'writeUserFields') {
+      if (!Array.isArray(perms[operation])) {
+        throw new Parse.Error(Parse.Error.INVALID_JSON, `'${perms[operation]}' is not a valid value for class level permissions ${operation}`);
+      } else {
+        perms[operation].forEach((key) => {
+          if (!fields[key] || fields[key].type != 'Pointer' || fields[key].targetClass != '_User') {
+             throw new Parse.Error(Parse.Error.INVALID_JSON, `'${key}' is not a valid column for class level pointer permissions ${operation}`);
+          }
+        });
+      }
+      return;
+    }
+
     Object.keys(perms[operation]).forEach((key) => {
       verifyPermissionKey(key);
       let perm = perms[operation][key];
@@ -237,6 +253,15 @@ class SchemaController {
         this.data[schema.className] = schema.fields;
         this.perms[schema.className] = schema.classLevelPermissions;
       });
+      
+      // Inject the in-memory classes
+      volatileClasses.forEach(className => {
+        this.data[className] = injectDefaultSchema({
+          className,
+          fields: {},
+          classLevelPermissions: {}
+        });
+      });
     });
   }
 
@@ -245,7 +270,10 @@ class SchemaController {
     .then(allSchemas => allSchemas.map(injectDefaultSchema));
   }
 
-  getOneSchema(className) {
+  getOneSchema(className, allowVolatileClasses = false) {
+    if (allowVolatileClasses && volatileClasses.indexOf(className) > -1) {
+      return Promise.resolve(this.data[className]);
+    }
     return this._dbAdapter.getOneSchema(className)
     .then(injectDefaultSchema);
   }
@@ -533,7 +561,7 @@ class SchemaController {
       if (this.data[className][fieldName].type == 'Relation') {
         //For relations, drop the _Join table
         return database.adapter.deleteFields(className, [fieldName], [])
-        .then(() => database.adapter.dropCollection(`_Join:${fieldName}:${className}`));
+        .then(() => database.adapter.deleteOneSchema(`_Join:${fieldName}:${className}`));
       }
 
       const fieldNames = [fieldName];
@@ -621,9 +649,24 @@ class SchemaController {
         found = true;
       }
     }
+<<<<<<< HEAD
     if (!found) {
       // TODO: Verify correct error code
       throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND,
+=======
+
+    if (found) {
+      return Promise.resolve();
+    }
+
+    // No matching CLP, let's check the Pointer permissions
+    // And handle those later
+    let permissionField = ['get', 'find'].indexOf(operation) > -1 ? 'readUserFields' : 'writeUserFields';
+
+    // Reject create when write lockdown
+    if (permissionField == 'writeUserFields' && operation == 'create') {
+      throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN,
+>>>>>>> upstream/master
         'Permission denied for this action.');
     }
   };

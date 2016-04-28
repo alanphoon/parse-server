@@ -191,11 +191,97 @@ function transformWhere(schema, className, restWhere, options = {validate: true}
   let transformKeyOptions = {query: true};
   transformKeyOptions.validate = options.validate;
   for (let restKey in restWhere) {
-    let out = transformKeyValue(schema, className, restKey, restWhere[restKey],
-                                transformKeyOptions);
+    let out = transformKeyValue(schema, className, restKey, restWhere[restKey], transformKeyOptions);
     mongoWhere[out.key] = out.value;
   }
   return mongoWhere;
+}
+
+const parseObjectKeyValueToMongoObjectKeyValue = (
+  schema,
+  className,
+  restKey,
+  restValue,
+  parseFormatSchema
+) => {
+  // Check if the schema is known since it's a built-in field.
+  let transformedValue;
+  let coercedToDate;
+  switch(restKey) {
+  case 'objectId': return {key: '_id', value: restValue};
+  case 'createdAt':
+    transformedValue = transformAtom(restValue, false);
+    coercedToDate = typeof transformedValue === 'string' ? new Date(transformedValue) : transformedValue
+    return {key: '_created_at', value: coercedToDate};
+  case 'updatedAt':
+    transformedValue = transformAtom(restValue, false);
+    coercedToDate = typeof transformedValue === 'string' ? new Date(transformedValue) : transformedValue
+    return {key: '_updated_at', value: coercedToDate};
+  case 'expiresAt':
+    transformedValue = transformAtom(restValue, false);
+    coercedToDate = typeof transformedValue === 'string' ? new Date(transformedValue) : transformedValue
+    return {key: 'expiresAt', value: coercedToDate};
+  case '_rperm':
+  case '_wperm':
+  case '_email_verify_token':
+  case '_hashed_password':
+  case '_perishable_token': return {key: restKey, value: restValue};
+  case 'sessionToken': return {key: '_session_token', value: restValue};
+  default:
+    // Auth data should have been transformed already
+    if (restKey.match(/^authData\.([a-zA-Z0-9_]+)\.id$/)) {
+      throw new Parse.Error(Parse.Error.INVALID_KEY_NAME, 'can only query on ' + restKey);
+    }
+    // Trust that the auth data has been transformed and save it directly
+    if (restKey.match(/^_auth_data_[a-zA-Z0-9_]+$/)) {
+      return {key: restKey, value: restValue};
+    }
+  }
+  //skip straight to transformAtom for Bytes, they don't show up in the schema for some reason
+  if (restValue && restValue.__type !== 'Bytes') {
+    //Note: We may not know the type of a field here, as the user could be saving (null) to a field
+    //That never existed before, meaning we can't infer the type.
+    if (parseFormatSchema.fields[restKey] && parseFormatSchema.fields[restKey].type == 'Pointer' || restValue.__type == 'Pointer') {
+      restKey = '_p_' + restKey;
+    }
+  }
+
+  // Handle atomic values
+  var value = transformAtom(restValue, false, { inArray: false, inObject: false });
+  if (value !== CannotTransform) {
+    return {key: restKey, value: value};
+  }
+
+  // ACLs are handled before this method is called
+  // If an ACL key still exists here, something is wrong.
+  if (restKey === 'ACL') {
+    throw 'There was a problem transforming an ACL.';
+  }
+
+  // Handle arrays
+  if (restValue instanceof Array) {
+    value = restValue.map((restObj) => {
+      var out = transformKeyValue(schema, className, restKey, restObj, { inArray: true });
+      return out.value;
+    });
+    return {key: restKey, value: value};
+  }
+
+  // Handle update operators. TODO: handle within Parse Server. DB adapter shouldn't see update operators in creates.
+  value = transformUpdateOperator(restValue, true);
+  if (value !== CannotTransform) {
+    return {key: restKey, value: value};
+  }
+
+  // Handle normal objects by recursing
+  value = {};
+  for (var subRestKey in restValue) {
+    var subRestValue = restValue[subRestKey];
+    var out = transformKeyValue(schema, className, subRestKey, subRestValue, { inObject: true });
+    // For recursed objects, keep the keys in rest format
+    value[subRestKey] = out.value;
+  }
+  return {key: restKey, value: value};
 }
 
 // Main exposed method to create new objects.
@@ -237,8 +323,7 @@ function transformUpdate(schema, className, restUpdate) {
   }
 
   for (var restKey in restUpdate) {
-    var out = transformKeyValue(schema, className, restKey, restUpdate[restKey],
-                                {update: true});
+    var out = transformKeyValue(schema, className, restKey, restUpdate[restKey], {update: true});
 
     // If the output value is an object with any $ keys, it's an
     // operator that needs to be lifted onto the top level update
@@ -822,14 +907,6 @@ function transformNotInQuery(notInQueryObject, className, results) {
   }
 }
 
-function addWriteACL(mongoWhere, acl) {
-  return {'$and': [mongoWhere, {"_wperm" : { "$in" : [null, ...acl]}}]};
-}
-
-function addReadACL(mongoWhere, acl) {
-  return {'$and': [mongoWhere, {"_rperm" : { "$in" : [null, "*", ...acl]}}]};
-}
-
 var DateCoder = {
   JSONToDatabase(json) {
     return new Date(json.iso);
@@ -927,7 +1004,5 @@ module.exports = {
   transformDontSelect,
   transformInQuery,
   transformNotInQuery,
-  addReadACL,
-  addWriteACL,
   untransformObject
 };
