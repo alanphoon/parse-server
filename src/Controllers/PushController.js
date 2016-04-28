@@ -101,9 +101,12 @@ export class PushController extends AdaptableController {
 
   sendToAdapter(body, installations, pushStatus, config) {
 
+    function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
     var _npmlog = require('npmlog');
     var _npmlog2 = _interopRequireDefault(_npmlog);
     _npmlog2.default.verbose('pushcontroller >> ', installations);
+
 
     if (body.data && body.data.badge && typeof body.data.badge == 'string' && body.data.badge.toLowerCase() == "increment") {
       // Collect the badges to reduce the # of calls
