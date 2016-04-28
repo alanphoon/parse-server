@@ -101,6 +101,9 @@ export class PushController extends AdaptableController {
 
   sendToAdapter(body, installations, pushStatus, config) {
     
+    var _npmlog = require('npmlog');
+    var _npmlog2 = _interopRequireDefault(_npmlog);
+
     if (body.data && body.data.badge && typeof body.data.badge == 'string' && body.data.badge.toLowerCase() == "increment") {
       // Collect the badges to reduce the # of calls
       let badgeInstallationsMap = installations.reduce((map, installation) => {
@@ -121,7 +124,7 @@ export class PushController extends AdaptableController {
         } else {
           payload.data.badge = parseInt(badge);
         }
-        console.log('PushController:: ' + badgeInstallationsMap[badge]);
+        _npmlog2.default.verbose('PushController: ', badgeInstallationsMap[badge]);
         return this.adapter.send(payload, badgeInstallationsMap[badge]);
       });
       return Promise.all(promises);
