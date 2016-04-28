@@ -99,7 +99,7 @@ export class PushController extends AdaptableController {
       return this.sendToAdapter(body, response.results, pushStatus, config);
     }).then((results) => {
       /** Debug Logging AP **/
-      _npmlog2.default.info('pushcontroller >> sendPush >> results >> ', results);
+      _npmlog2.default.info('pushcontroller >> sendPush >> results >> ', results.map(function(a) {return a.device.deviceToken} ));
       /*********************/
       return pushStatus.complete(results);
     }).catch((err) => {
