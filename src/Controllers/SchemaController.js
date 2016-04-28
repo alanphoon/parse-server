@@ -1,4 +1,4 @@
-// This class handles schema validation, persistence, and modification.
+/// This class handles schema validation, persistence, and modification.
 //
 // Each individual Schema object should be immutable. The helpers to
 // do things with the Schema just return a new schema when the schema
@@ -91,7 +91,7 @@ const requiredColumns = Object.freeze({
   _Role: ["name", "ACL"]
 });
 
-const systemClasses = Object.freeze(['_User', '_Installation', '_Role', '_Session', '_Product']);
+const systemClasses = Object.freeze(['_User', '_Installation', '_Role', '_Session', '_Product', '_PushStatus']);
 
 const volatileClasses = Object.freeze(['_PushStatus']);
 
@@ -114,8 +114,8 @@ function verifyPermissionKey(key) {
   }
 }
 
-const CLPValidKeys = Object.freeze(['find', 'get', 'create', 'update', 'delete', 'addField']);
-function validateCLP(perms) {
+const CLPValidKeys = Object.freeze(['find', 'get', 'create', 'update', 'delete', 'addField', 'readUserFields', 'writeUserFields']);
+function validateCLP(perms, fields) {
   if (!perms) {
     return;
   }
@@ -346,7 +346,7 @@ class SchemaController {
         });
         return Promise.all(promises);
       })
-      .then(() => this.setPermissions(className, classLevelPermissions))
+      .then(() => this.setPermissions(className, classLevelPermissions, newSchema))
       //TODO: Move this logic into the database adapter
       .then(() => ({
         className: className,
@@ -369,12 +369,8 @@ class SchemaController {
 
   // Returns a promise that resolves successfully to the new schema
   // object or fails with a reason.
-  // If 'freeze' is true, refuse to update the schema.
-  // WARNING: this function has side-effects, and doesn't actually
-  // do any validation of the format of the className. You probably
-  // should use classNameIsValid or addClassIfNotExists or something
-  // like that instead. TODO: rename or remove this function.
-  validateClassName(className, freeze) {
+  // If 'freeze' is true, refuse to modify the schema.
+  enforceClassExists(className, freeze) {
     if (this.data[className]) {
       return Promise.resolve(this);
     }
@@ -394,7 +390,7 @@ class SchemaController {
       return this.reloadData();
     }).then(() => {
       // Ensure that the schema now validates
-      return this.validateClassName(className, true);
+      return this.enforceClassExists(className, true);
     }, () => {
       // The schema still doesn't validate. Give up
       throw new Parse.Error(Parse.Error.INVALID_JSON, 'schema class name does not revalidate');
@@ -443,15 +439,15 @@ class SchemaController {
         error: 'currently, only one GeoPoint field may exist in an object. Adding ' + geoPoints[1] + ' when ' + geoPoints[0] + ' already exists.',
       };
     }
-    validateCLP(classLevelPermissions);
+    validateCLP(classLevelPermissions, fields);
   }
 
   // Sets the Class-level permissions for a given className, which must exist.
-  setPermissions(className, perms) {
+  setPermissions(className, perms, newSchema) {
     if (typeof perms === 'undefined') {
       return Promise.resolve();
     }
-    validateCLP(perms);
+    validateCLP(perms, newSchema);
     let update = {
       _metadata: {
         class_permissions: perms
@@ -575,7 +571,7 @@ class SchemaController {
   // valid.
   validateObject(className, object, query) {
     let geocount = 0;
-    let promise = this.validateClassName(className);
+    let promise = this.enforceClassExists(className);
     for (let fieldName in object) {
       if (object[fieldName] === undefined) {
         continue;
@@ -637,7 +633,8 @@ class SchemaController {
     if (!this.perms[className] || !this.perms[className][operation]) {
       return Promise.resolve();
     }
-    let perms = this.perms[className][operation];
+    let classPerms = this.perms[className];
+    let perms = classPerms[operation];
     // Handle the public scenario quickly
     if (perms['*']) {
       return Promise.resolve();
@@ -663,6 +660,12 @@ class SchemaController {
       throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN,
         'Permission denied for this action.');
     }
+
+    if (Array.isArray(classPerms[permissionField]) && classPerms[permissionField].length > 0) {
+        return Promise.resolve();
+    }
+    throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN,
+        'Permission denied for this action.');
   };
 
   // Returns the expected type for a className+key combination
@@ -679,21 +682,12 @@ class SchemaController {
     return this.reloadData().then(() => !!(this.data[className]));
   }
 
-  // Helper function to check if a field is a pointer, returns true or false.
-  isPointer(className, key) {
-    let expected = this.getExpectedType(className, key);
-    if (expected && expected.charAt(0) == '*') {
-      return true;
-    }
-    return false;
-  };
-
   getRelationFields(className) {
     if (this.data && this.data[className]) {
       let classData = this.data[className];
       return Object.keys(classData).filter((field) => {
         return classData[field].type === 'Relation';
-      }).reduce((memo, field) => {
+      }).reduce((memo, field) => {
         let type = classData[field];
         memo[field] = {
           __type: 'Relation',
