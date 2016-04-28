@@ -3,8 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import DailyRotateFile from 'winston-daily-rotate-file';
 
-//let LOGS_FOLDER = './logs/';
-let LOGS_FOLDER = '/var/log/nodejs/';
+let LOGS_FOLDER = './logs/';
 
 if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
   LOGS_FOLDER = './test_logs/'
