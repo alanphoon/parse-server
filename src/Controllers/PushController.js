@@ -8,7 +8,6 @@ import RestQuery           from '../RestQuery';
 import RestWrite           from '../RestWrite';
 import { master }          from '../Auth';
 import pushStatusHandler   from '../pushStatusHandler';
-import { logger } from './../logger';
 
 const FEATURE_NAME = 'push';
 const UNSUPPORTED_BADGE_KEY = "unsupported";
@@ -122,7 +121,11 @@ export class PushController extends AdaptableController {
         } else {
           payload.data.badge = parseInt(badge);
         }
-        logger.verbose('pushcontroller >> ', badgeInstallationsMap[badge]);
+
+        var _npmlog = require('npmlog');
+        var _npmlog2 = _interopRequireDefault(_npmlog);
+        _npmlog2.default.verbose('pushcontroller >> ', badgeInstallationsMap[badge]);
+
         return this.adapter.send(payload, badgeInstallationsMap[badge]);
       });
       return Promise.all(promises);
