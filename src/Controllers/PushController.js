@@ -124,6 +124,8 @@ export class PushController extends AdaptableController {
       });
       return Promise.all(promises);
     }
+
+    console.log(installations);
     return this.adapter.send(body, installations);
   }
 
